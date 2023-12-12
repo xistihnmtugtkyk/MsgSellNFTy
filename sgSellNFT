@@ -1,0 +1,73 @@
+package nft
+
+import (
+	"fmt"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
+
+// NFT represents a non-fungible token
+type NFT struct {
+	ID       uint64         `json:"id"`
+	Owner    sdk.AccAddress `json:"owner"`
+	TokenURI string         `json:"token_uri"`
+	Price    sdk.Coin       `json:"price"`
+}
+
+// MsgBuyNFT defines the BuyNFT message
+type MsgBuyNFT struct {
+	Buyer sdk.AccAddress `json:"buyer"`
+	NFTID uint64         `json:"nft_id"`
+}
+
+// MsgSellNFT defines the SellNFT message
+type MsgSellNFT struct {
+	Seller sdk.AccAddress `json:"seller"`
+	NFTID  uint64         `json:"nft_id"`
+	Price  sdk.Coin       `json:"price"`
+}
+
+// HandleMsgBuyNFT handles the BuyNFT message
+func HandleMsgBuyNFT(ctx sdk.Context, k Keeper, msg MsgBuyNFT) sdk.Result {
+	nft, found := k.GetNFT(ctx, msg.NFTID)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("NFT with ID %d not found", msg.NFTID)).Result()
+	}
+
+	// Check if buyer has sufficient funds
+	if !k.bankKeeper.HasCoins(ctx, msg.Buyer, sdk.Coins{msg.Price}) {
+		return sdk.ErrInsufficientFunds("buyer does not have enough funds").Result()
+	}
+
+	// Transfer funds from buyer to seller
+	err := k.bankKeeper.SendCoins(ctx, msg.Buyer, nft.Owner, sdk.Coins{msg.Price})
+	if err != nil {
+		return err.Result()
+	}
+
+	// Update NFT owner and remove price
+	nft.Owner = msg.Buyer
+	nft.Price = sdk.NewCoin("", sdk.ZeroInt()) // Reset the price
+	k.SetNFT(ctx, nft)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgSellNFT handles the SellNFT message
+func HandleMsgSellNFT(ctx sdk.Context, k Keeper, msg MsgSellNFT) sdk.Result {
+	nft, found := k.GetNFT(ctx, msg.NFTID)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("NFT with ID %d not found", msg.NFTID)).Result()
+	}
+
+	// Check if seller owns the NFT
+	if !nft.Owner.Equals(msg.Seller) {
+		return sdk.ErrUnauthorized("seller does not own the NFT").Result()
+	}
+
+	// Set NFT for sale with a price
+	nft.Price = msg.Price
+	k.SetNFT(ctx, nft)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
